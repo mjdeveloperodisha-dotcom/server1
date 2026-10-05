@@ -22,7 +22,7 @@ function loadEnv(file = path.join(__dirname, '.env')) {
 }
 loadEnv();
 process.env.SERVER_ROLE='core';
-const SERVER_BUILD_ID = 'server1-csrf-enabled-2026-10-04';
+const SERVER_BUILD_ID = 'server1-csrf-disabled-2026-10-04';
 
 const CFG = {
   port: Number(process.env.SERVER1_PORT || process.env.PORT || 3000),
@@ -456,77 +456,10 @@ function isHttps(req){return process.env.NODE_ENV==='production'||String(req.hea
 function cookieBase(res){return 'Path=/; HttpOnly; '+(isHttps(res.req)?'Secure; ':'')+'SameSite=Strict; Max-Age=43200';}
 function setSessionCookie(res,token,portal){const name=portal==='admin'?'cem_admin_session':'cem_user_session';res.setHeader('Set-Cookie',name+'='+encodeURIComponent(token)+'; '+cookieBase(res));}
 function clearSessionCookie(res,portal){const base='Path=/; HttpOnly; '+(isHttps(res.req)?'Secure; ':'')+'SameSite=Strict; Max-Age=0';const names=portal==='admin'?['cem_admin_session']:portal==='student'?['cem_user_session']:['cem_admin_session','cem_user_session'];res.setHeader('Set-Cookie',names.map(n=>n+'=; '+base));}
-const CSRF_COOKIE_NAME = process.env.NODE_ENV === 'production' ? '__Host-cem_csrf' : 'cem_csrf';
-const CSRF_TTL_MS = 2 * 60 * 60 * 1000;
-
-function createCsrfToken() {
-  const nonce = crypto.randomBytes(32).toString('base64url');
-  const issuedAt = Date.now().toString();
-  const payload = nonce + '.' + issuedAt;
-  const sig = crypto.createHmac('sha256', AUTH_SESSION_SECRET).update(payload).digest('base64url');
-  return payload + '.' + sig;
-}
-
-function verifyCsrfToken(token) {
-  const value = String(token || '');
-  const parts = value.split('.');
-  if (parts.length !== 3 || !parts[0] || !/^\d+$/.test(parts[1]) || !parts[2]) return false;
-  const issuedAt = Number(parts[1]);
-  if (!Number.isSafeInteger(issuedAt) || issuedAt > Date.now() + 30000 || Date.now() - issuedAt > CSRF_TTL_MS) return false;
-  const payload = parts[0] + '.' + parts[1];
-  const expected = crypto.createHmac('sha256', AUTH_SESSION_SECRET).update(payload).digest('base64url');
-  const actualBuf = Buffer.from(parts[2]);
-  const expectedBuf = Buffer.from(expected);
-  return actualBuf.length === expectedBuf.length && crypto.timingSafeEqual(actualBuf, expectedBuf);
-}
-
-function setCsrfCookie(res, token) {
-  const secure = isHttps(res.req);
-  const prefix = secure ? '__Host-cem_csrf' : 'cem_csrf';
-  res.setHeader('Set-Cookie', prefix + '=' + encodeURIComponent(token) + '; Path=/; HttpOnly; ' + (secure ? 'Secure; ' : '') + 'SameSite=Strict; Max-Age=7200');
-}
-
-function csrfCookieToken(req) {
-  return parseCookies(req)[CSRF_COOKIE_NAME] || '';
-}
-
-function expectedFrontendOrigin(req) {
-  const configured = String(process.env.FRONTEND_ORIGIN || '').trim().replace(/\/$/, '');
-  if (configured) return configured;
-  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
-  const forwardedHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
-  return forwardedHost ? (forwardedProto || (isHttps(req) ? 'https' : 'http')) + '://' + forwardedHost : '';
-}
-
-function validateRequestOrigin(req) {
-  const expected = expectedFrontendOrigin(req);
-  if (!expected) throw Object.assign(new Error('CSRF origin validation is not configured.'), { status: 503 });
-  const origin = String(req.headers.origin || '').trim();
-  if (origin) {
-    if (origin !== expected) throw Object.assign(new Error('CSRF origin validation failed.'), { status: 403 });
-    return;
-  }
-  const referer = String(req.headers.referer || '').trim();
-  if (referer) {
-    try {
-      if (new URL(referer).origin !== expected) throw Object.assign(new Error('CSRF origin validation failed.'), { status: 403 });
-      return;
-    } catch (e) {
-      if (e.status) throw e;
-      throw Object.assign(new Error('CSRF origin validation failed.'), { status: 403 });
-    }
-  }
-  throw Object.assign(new Error('CSRF origin validation failed.'), { status: 403 });
-}
-
-function validateCsrf(req) {
-  validateRequestOrigin(req);
-  const headerToken = String(req.headers['x-csrf-token'] || '');
-  const cookieToken = csrfCookieToken(req);
-  if (!headerToken || !cookieToken || headerToken !== cookieToken || !verifyCsrfToken(headerToken)) {
-    throw Object.assign(new Error('CSRF validation failed. Refresh the page and try again.'), { status: 403 });
-  }
-}
+// CSRF enforcement intentionally disabled.
+// The frontend still calls /api/auth/csrf, so this compatibility endpoint returns
+// a non-secret placeholder. No CSRF cookie/token is trusted or validated.
+function csrfCompatibilityToken(){ return 'csrf-disabled'; }
 
 function securityHeaders(req){const h={'X-Content-Type-Options':'nosniff','X-Frame-Options':'SAMEORIGIN','Referrer-Policy':'strict-origin-when-cross-origin','Permissions-Policy':'camera=(), microphone=(), geolocation=(), payment=(self "https://checkout.razorpay.com")','Cross-Origin-Opener-Policy':'same-origin','Cross-Origin-Resource-Policy':'same-origin','X-DNS-Prefetch-Control':'off','X-Permitted-Cross-Domain-Policies':'none','Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.razorpay.com; frame-src https://checkout.razorpay.com https://api.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"};if(isHttps(req))h['Strict-Transport-Security']='max-age=31536000; includeSubDomains';return h;}
 function send(res,status,data){const h=securityHeaders(res.req);Object.assign(h,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Access-Control-Allow-Origin':'null','Access-Control-Allow-Headers':'Content-Type, Authorization, X-CEM-Portal, X-CSRF-Token','Access-Control-Allow-Methods':'GET,POST,PUT,DELETE,OPTIONS'});res.writeHead(status,h);res.end(JSON.stringify(data));}
@@ -615,15 +548,8 @@ async function route(req, res) {
   const method = req.method;
   if (process.env.SERVER_ROLE === 'core' && (url.pathname==='/api/tests' || url.pathname.startsWith('/api/tests/') || url.pathname==='/api/admin/ratings')) return send(res,404,{error:'Exam API is served by Server 2.'});
   if (method==='OPTIONS') return send(res,204,{});
-  if (url.pathname==='/api/auth/csrf' && method==='GET') {
-    const token = createCsrfToken();
-    setCsrfCookie(res, token);
-    return send(res,200,{csrfToken:token});
-  }
-  if (url.pathname.startsWith('/api/') && method!=='GET' && url.pathname!=='/api/webhook' && url.pathname!=='/api/internal/auth/verify') {
-    validateCsrf(req);
-    rateLimit(req,'api-global',180,60000);
-  }
+  if (url.pathname==='/api/auth/csrf' && method==='GET') { return send(res,200,{csrfToken:csrfCompatibilityToken(),disabled:true}); }
+  if (url.pathname.startsWith('/api/') && method!=='GET' && url.pathname!=='/api/webhook' && url.pathname!=='/api/internal/auth/verify') { rateLimit(req,'api-global',180,60000); }
 
   if (url.pathname==='/api/internal/auth/verify' && method==='POST') {
     if(String(req.headers['x-internal-auth']||'')!==String(process.env.INTERNAL_AUTH_SECRET||'')) return send(res,403,{error:'Forbidden.'});
@@ -641,7 +567,21 @@ async function route(req, res) {
   if (url.pathname==='/api/health' && method==='GET') {
     return send(res,200,{ok:true,status:'online',build:SERVER_BUILD_ID,gmail:gmailConfigStatus()});
   }
-
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    server: "server1",
+    timestamp: new Date().toISOString()
+  });
+});
+  setInterval(async () => {
+  try {
+    await fetch("https://server2-xd6t.onrender.com/health");
+    console.log("Server 2 is alive");
+  } catch (err) {
+    console.error("Server 2 ping failed:", err.message);
+  }
+}, 5 * 60 * 1000);
   if (url.pathname==='/api/admin/request-otp' && method==='POST') {
     const b=await body(req), email=cleanEmail(b.email); rateLimit(req,'admin-otp',5,900000,email);
     if(email!==CFG.admin.email) throw Object.assign(new Error('This email is not authorized for Admin access.'),{status:403});
@@ -1325,7 +1265,6 @@ function serveStatic(req,res) {
 
 
 function proxyExamRequest(req,res){
-  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') validateCsrf(req);
   const target=new URL(process.env.SERVER2_URL||'http://127.0.0.1:3001');
   const upstreamPath=req.url.replace(/^\/exam-api/,'')||'/';
   const transport=target.protocol==='https:'?https:http;
