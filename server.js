@@ -903,7 +903,15 @@ async function route(req, res) {
     const {user}=await currentUser(req,['admin','teacher']);
     const b=await body(req);
     const mods=await allMap('modules');
-    if(!mods || !Object.values(mods).some(m=>m.name===b.category)) throw new Error('Please choose a valid exam module.');
+    const requestedModule=String(b.category ?? b.moduleId ?? b.module ?? '').trim();
+    const selectedModule=Object.values(mods||{}).find(m=>{
+      if(!m||typeof m!=='object') return false;
+      const id=String(m.id||'').trim();
+      const name=String(m.name||'').trim();
+      return requestedModule===id || (name && name.toLowerCase()===requestedModule.toLowerCase());
+    });
+    if(!selectedModule) throw new Error('Please choose a valid exam module.');
+    const categoryName=String(selectedModule.name||'').trim();
     if(!b.title || !Array.isArray(b.questions) || !b.questions.length) throw new Error('Test title and at least one question are required.');
     let subjects=Array.isArray(b.subjects)?b.subjects.map(String).map(s=>s.trim()).filter(Boolean):['General']; subjects=[...new Set(subjects)];
     let languages=Array.isArray(b.languages)?b.languages.map(String).map(s=>s.trim()).filter(Boolean):['English']; languages=[...new Set(languages.length?languages:['English'])];
@@ -918,7 +926,7 @@ async function route(req, res) {
       }
       qs.push({question,options,answer,subject:String(q.subject||'General').trim()||'General',marks:Number.isFinite(Number(q.marks))?Number(q.marks):1,negative:Number.isFinite(Number(q.negative))?Number(q.negative):0,explanation:String(q.explanation||''),translations});
     });
-    const t={id:uid('T'),title:String(b.title).trim(),exam:String(b.exam||'Competitive Exam').trim(),category:b.category,subjects,languages,type:String(b.type||'FREE').toUpperCase()==='PAID'?'paid':'free',price:0,duration:Number.parseInt(b.duration,10)||30,questions:qs,questionCount:qs.length,createdBy:user.email,createdById:user.uid,createdAt:nowIso(),published:true,attemptPolicy:b.attemptPolicy==='once'?'once':'reattempt'};
+    const t={id:uid('T'),title:String(b.title).trim(),exam:String(b.exam||'Competitive Exam').trim(),category:categoryName,subjects,languages,type:String(b.type||'FREE').toUpperCase()==='PAID'?'paid':'free',price:0,duration:Number.parseInt(b.duration,10)||30,questions:qs,questionCount:qs.length,createdBy:user.email,createdById:user.uid,createdAt:nowIso(),published:true,attemptPolicy:b.attemptPolicy==='once'?'once':'reattempt'};
     const tests=await allMap('tests'); tests[t.id]=t; await set('tests',tests);
     return send(res,200,{message:'Test Series added successfully and published.',test:summarizeTest(t)});
   }
