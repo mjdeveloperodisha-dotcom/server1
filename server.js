@@ -22,7 +22,7 @@ function loadEnv(file = path.join(__dirname, '.env')) {
 }
 loadEnv();
 process.env.SERVER_ROLE='core';
-const SERVER_BUILD_ID = 'server1-payment-env-resolver-fix-2026-10-05';
+const SERVER_BUILD_ID = 'server1-paid-verification-fix-2026-10-11';
 
 function envValue(...names) {
   for (const name of names) {
